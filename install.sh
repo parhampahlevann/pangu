@@ -4,9 +4,8 @@
 set -euo pipefail
 
 # ---------------- Config ----------------
-VERSION="v4.2.1"
-ZIP_NAME="PenguTunnel-${VERSION}.zip"
-EXTRACT_DIR="PenguTunnel-4.2.1"   # folder name inside the zip (no "v")
+VERSION="v5.0.4"
+ZIP_NAME="PenguTunnel-${VERSION}-Offline.zip"
 DOWNLOAD_URL="https://github.com/parhampahlevann/pangu/releases/download/${VERSION}/${ZIP_NAME}"
 WORK_DIR="/tmp/pangu-install-$$"
 
@@ -45,6 +44,22 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# Find the directory the zip extracted into, without assuming its exact name
+# (the "-Offline" release may not unpack to the same folder-name pattern as
+# earlier versions did).
+detect_extract_dir() {
+    local candidate
+    # Most likely names first
+    for candidate in "PenguTunnel-${VERSION#v}" "PenguTunnel-${VERSION}" "PenguTunnel-${VERSION#v}-Offline" "PenguTunnel-${VERSION}-Offline"; do
+        if [ -d "$candidate" ]; then
+            echo "$candidate"
+            return 0
+        fi
+    done
+    # Fallback: the only top-level directory produced by extraction
+    find . -mindepth 1 -maxdepth 1 -type d | head -n1
+}
+
 # ---------------- Main ----------------
 main() {
     need_root
@@ -59,16 +74,20 @@ main() {
     echo "[*] Extracting archive..."
     unzip -oq "$ZIP_NAME"
 
-    if [ ! -d "$EXTRACT_DIR" ]; then
-        echo "[!] Folder $EXTRACT_DIR not found after extraction. Archive contents:"
+    local extract_dir
+    extract_dir="$(detect_extract_dir)"
+
+    if [ -z "$extract_dir" ] || [ ! -d "$extract_dir" ]; then
+        echo "[!] Could not find the extracted folder. Archive contents:"
         ls -la
         exit 1
     fi
 
-    cd "$EXTRACT_DIR"
+    cd "$extract_dir"
 
     if [ ! -f "install.sh" ]; then
-        echo "[!] install.sh not found inside the package."
+        echo "[!] install.sh not found inside the package. Contents of $extract_dir:"
+        ls -la
         exit 1
     fi
 
