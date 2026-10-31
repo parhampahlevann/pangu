@@ -5,9 +5,11 @@ set -euo pipefail
 
 # ---------------- Config ----------------
 VERSION="v5.1.2"
-ZIP_NAME="PenguTunnel-${VERSION}-Offline.zip"
+BUILD_TAG="ProofFix1"
+ZIP_NAME="PenguTunnel-${VERSION}-${BUILD_TAG}-Offline.zip"
 DOWNLOAD_URL="https://github.com/parhampahlevann/pangu/releases/download/${VERSION}/${ZIP_NAME}"
 WORK_DIR="/tmp/pangu-install-$$"
+INSTALL_ARGS=(--repair-existing)
 
 # ---------------- Helpers ----------------
 need_root() {
@@ -43,9 +45,11 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# The folder name inside the zip has changed between releases before
-# (e.g. "PenguTunnel-4.2.1" vs a "v"/"-Offline" variant), so detect it
-# instead of hardcoding it — avoids breaking again on the next version bump.
+# The folder name inside the zip doesn't necessarily match the zip's own
+# file name (the zip carries the "v" prefix, e.g. PenguTunnel-v5.1.2-...,
+# while the extracted folder is PenguTunnel-5.1.2-...-Offline), so detect
+# it instead of hardcoding it — avoids breaking again on the next version
+# or naming-scheme change.
 detect_extract_dir() {
   local dirs count
   dirs=$(find . -mindepth 1 -maxdepth 1 -type d)
@@ -85,9 +89,9 @@ main() {
     exit 1
   fi
 
-  echo "[*] Running the PenguTunnel installer..."
+  echo "[*] Running the PenguTunnel installer (${INSTALL_ARGS[*]})..."
   chmod +x install.sh
-  bash install.sh
+  bash install.sh "${INSTALL_ARGS[@]}" "$@"
 
   echo "[+] Installation complete."
 }
