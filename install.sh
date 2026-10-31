@@ -4,10 +4,12 @@
 set -euo pipefail
 
 # ---------------- Config ----------------
-VERSION="v5.1.2"
-BUILD_TAG="ProofFix1"
-ZIP_NAME="PenguTunnel-${VERSION}-${BUILD_TAG}-Offline.zip"
+VERSION="v5.1.6"
+ZIP_NAME="PenguTunnel-${VERSION}-Offline.zip"
 DOWNLOAD_URL="https://github.com/parhampahlevann/pangu/releases/download/${VERSION}/${ZIP_NAME}"
+# Confirmed extracted folder name for this release: no "v" prefix, e.g.
+# PenguTunnel-5.1.6-Offline (unlike the zip file name, which keeps the "v").
+EXPECTED_DIR="PenguTunnel-${VERSION#v}-Offline"
 WORK_DIR="/tmp/pangu-install-$$"
 INSTALL_ARGS=(--repair-existing)
 
@@ -46,8 +48,8 @@ cleanup() {
 trap cleanup EXIT
 
 # The folder name inside the zip doesn't necessarily match the zip's own
-# file name (the zip carries the "v" prefix, e.g. PenguTunnel-v5.1.2-...,
-# while the extracted folder is PenguTunnel-5.1.2-...-Offline), so detect
+# file name (the zip carries the "v" prefix, e.g. PenguTunnel-v5.1.6-...,
+# while the extracted folder is PenguTunnel-5.1.6-...-Offline), so detect
 # it instead of hardcoding it — avoids breaking again on the next version
 # or naming-scheme change.
 detect_extract_dir() {
@@ -75,10 +77,14 @@ main() {
   echo "[*] Extracting archive..."
   unzip -oq "$ZIP_NAME"
 
-  local extract_dir
-  extract_dir="$(detect_extract_dir)"
-  if [ -z "$extract_dir" ]; then
-    echo "[!] Could not uniquely detect the extracted folder. Archive contents:"
+  local extract_dir="$EXPECTED_DIR"
+  if [ ! -d "$extract_dir" ]; then
+    # Naming scheme changed from what we expected — fall back to detection
+    # instead of failing outright.
+    extract_dir="$(detect_extract_dir)"
+  fi
+  if [ -z "$extract_dir" ] || [ ! -d "$extract_dir" ]; then
+    echo "[!] Could not find the extracted folder. Archive contents:"
     ls -la
     exit 1
   fi
