@@ -1,105 +1,128 @@
 #!/usr/bin/env bash
-# PenguTunnel bootstrap installer
-# One-command run: download + extract + execute the real install.sh
+#
+# PenguPanel Auto-Installer
+# دانلود، نصب (repair-existing) و نمایش منوی مدیریت به‌صورت خودکار
+#
 set -euo pipefail
 
-# ---------------- Config ----------------
-VERSION="v5.1.6"
-ZIP_NAME="PenguTunnel-${VERSION}-Offline.zip"
-DOWNLOAD_URL="https://github.com/parhampahlevann/pangu/releases/download/${VERSION}/${ZIP_NAME}"
-# Confirmed extracted folder name for this release: no "v" prefix, e.g.
-# PenguTunnel-5.1.6-Offline (unlike the zip file name, which keeps the "v").
-EXPECTED_DIR="PenguTunnel-${VERSION#v}-Offline"
-WORK_DIR="/tmp/pangu-install-$$"
-INSTALL_ARGS=(--repair-existing)
+# ---------------------------------------------------------------------------
+# تنظیمات
+# ---------------------------------------------------------------------------
+PKG_URL="https://github.com/parhampahlevann/pangu/releases/download/v5.1.6/pengu.zip"
+WORK_DIR="/opt/pengupanel-install"
+ZIP_NAME="pengu.zip"
+INSTALL_SCRIPT_REL="PenguPanel/install.sh"
 
-# ---------------- Helpers ----------------
-need_root() {
-  if [ "$(id -u)" -ne 0 ]; then
-    echo "[!] This script must be run with sudo."
-    echo "    Example: sudo bash <(curl -fsSL <url-of-this-file>)"
+# نام‌های احتمالی دستور سراسری که ممکن است نصب‌کننده بسازد
+MENU_COMMAND_CANDIDATES=(pengu pangu penguctl pengupanel pengu-panel)
+
+# ---------------------------------------------------------------------------
+# توابع کمکی برای خروجی رنگی
+# ---------------------------------------------------------------------------
+C_GREEN='\033[0;32m'
+C_RED='\033[0;31m'
+C_YELLOW='\033[1;33m'
+C_RESET='\033[0m'
+
+log()  { echo -e "${C_GREEN}[+]${C_RESET} $1"; }
+warn() { echo -e "${C_YELLOW}[!]${C_RESET} $1"; }
+err()  { echo -e "${C_RED}[x]${C_RESET} $1" >&2; }
+
+# ---------------------------------------------------------------------------
+# بررسی دسترسی root
+# ---------------------------------------------------------------------------
+if [[ ${EUID} -ne 0 ]]; then
+    err "این اسکریپت باید با دسترسی root اجرا شود. مثال: sudo bash install.sh"
     exit 1
-  fi
-}
+fi
 
-install_deps() {
-  local missing=0
-  command -v curl  >/dev/null 2>&1 || missing=1
-  command -v unzip >/dev/null 2>&1 || missing=1
-  if [ "$missing" -eq 1 ]; then
-    echo "[*] Installing dependencies (curl, unzip)..."
-    if command -v apt-get >/dev/null 2>&1; then
-      apt-get update -y
-      apt-get install -y curl unzip
-    elif command -v yum >/dev/null 2>&1; then
-      yum install -y curl unzip
-    elif command -v dnf >/dev/null 2>&1; then
-      dnf install -y curl unzip
-    else
-      echo "[!] No supported package manager found; install curl and unzip manually and rerun."
-      exit 1
+# ---------------------------------------------------------------------------
+# نصب پیش‌نیازها (curl, unzip)
+# ---------------------------------------------------------------------------
+install_prereqs() {
+    local missing=()
+    for cmd in curl unzip; do
+        command -v "${cmd}" >/dev/null 2>&1 || missing+=("${cmd}")
+    done
+
+    if [[ ${#missing[@]} -gt 0 ]]; then
+        log "نصب پیش‌نیازهای مورد نیاز: ${missing[*]}"
+        if command -v apt-get >/dev/null 2>&1; then
+            apt-get update -qq
+            apt-get install -y "${missing[@]}"
+        elif command -v dnf >/dev/null 2>&1; then
+            dnf install -y "${missing[@]}"
+        elif command -v yum >/dev/null 2>&1; then
+            yum install -y "${missing[@]}"
+        else
+            err "پکیج‌منیجر شناخته‌شده‌ای پیدا نشد. لطفاً ${missing[*]} را دستی نصب کنید."
+            exit 1
+        fi
     fi
-  fi
 }
 
-cleanup() {
-  rm -rf "$WORK_DIR"
-}
-trap cleanup EXIT
+# ---------------------------------------------------------------------------
+# دانلود و استخراج بسته
+# ---------------------------------------------------------------------------
+download_and_extract() {
+    mkdir -p "${WORK_DIR}"
+    cd "${WORK_DIR}"
 
-# The folder name inside the zip doesn't necessarily match the zip's own
-# file name (the zip carries the "v" prefix, e.g. PenguTunnel-v5.1.6-...,
-# while the extracted folder is PenguTunnel-5.1.6-...-Offline), so detect
-# it instead of hardcoding it — avoids breaking again on the next version
-# or naming-scheme change.
-detect_extract_dir() {
-  local dirs count
-  dirs=$(find . -mindepth 1 -maxdepth 1 -type d)
-  count=$(printf '%s\n' "$dirs" | grep -c .)
-  if [ "$count" -eq 1 ]; then
-    printf '%s\n' "$dirs"
-  else
-    echo ""
-  fi
+    log "در حال دانلود بسته از:"
+    echo "      ${PKG_URL}"
+    if ! curl -fL --retry 3 --retry-delay 2 -o "${ZIP_NAME}" "${PKG_URL}"; then
+        err "دانلود فایل ناموفق بود. اتصال اینترنت یا آدرس را بررسی کنید."
+        exit 1
+    fi
+
+    log "در حال استخراج فایل..."
+    unzip -oq "${ZIP_NAME}"
+
+    if [[ ! -f "${INSTALL_SCRIPT_REL}" ]]; then
+        err "فایل ${INSTALL_SCRIPT_REL} پس از استخراج پیدا نشد."
+        exit 1
+    fi
+    chmod +x "${INSTALL_SCRIPT_REL}"
 }
 
-# ---------------- Main ----------------
+# ---------------------------------------------------------------------------
+# اجرای نصب‌کننده اصلی
+# ---------------------------------------------------------------------------
+run_installer() {
+    log "در حال اجرای نصب‌کننده با گزینه --repair-existing ..."
+    bash "${INSTALL_SCRIPT_REL}" --repair-existing
+    log "نصب / تعمیر با موفقیت به پایان رسید."
+}
+
+# ---------------------------------------------------------------------------
+# نمایش منوی مدیریت پس از نصب
+# ---------------------------------------------------------------------------
+show_menu() {
+    log "در حال باز کردن منوی مدیریت..."
+
+    # اگر نصب‌کننده یک دستور سراسری در PATH ساخته باشد، همان اجرا می‌شود
+    for cmd in "${MENU_COMMAND_CANDIDATES[@]}"; do
+        if command -v "${cmd}" >/dev/null 2>&1; then
+            exec "${cmd}"
+        fi
+    done
+
+    # در غیر این صورت، خود install.sh بدون فلگ اجرا می‌شود
+    # (در بسیاری از این پنل‌ها اجرای دوباره‌ی اسکریپت، منوی مدیریت را نشان می‌دهد)
+    if [[ -f "${INSTALL_SCRIPT_REL}" ]]; then
+        bash "${INSTALL_SCRIPT_REL}"
+    else
+        warn "دستور یا اسکریپت منو پیدا نشد؛ نصب کامل شد ولی منو به‌صورت خودکار باز نشد."
+        warn "می‌توانید دستی از مسیر زیر اجرا کنید:"
+        echo "      ${WORK_DIR}/${INSTALL_SCRIPT_REL}"
+    fi
+}
+
 main() {
-  need_root
-  install_deps
-
-  mkdir -p "$WORK_DIR"
-  cd "$WORK_DIR"
-
-  echo "[*] Downloading ${ZIP_NAME} ..."
-  curl -fsSL -o "$ZIP_NAME" "$DOWNLOAD_URL"
-
-  echo "[*] Extracting archive..."
-  unzip -oq "$ZIP_NAME"
-
-  local extract_dir="$EXPECTED_DIR"
-  if [ ! -d "$extract_dir" ]; then
-    # Naming scheme changed from what we expected — fall back to detection
-    # instead of failing outright.
-    extract_dir="$(detect_extract_dir)"
-  fi
-  if [ -z "$extract_dir" ] || [ ! -d "$extract_dir" ]; then
-    echo "[!] Could not find the extracted folder. Archive contents:"
-    ls -la
-    exit 1
-  fi
-  cd "$extract_dir"
-
-  if [ ! -f "install.sh" ]; then
-    echo "[!] install.sh not found inside the package."
-    exit 1
-  fi
-
-  echo "[*] Running the PenguTunnel installer (${INSTALL_ARGS[*]})..."
-  chmod +x install.sh
-  bash install.sh "${INSTALL_ARGS[@]}" "$@"
-
-  echo "[+] Installation complete."
+    install_prereqs
+    download_and_extract
+    run_installer
+    show_menu
 }
 
 main "$@"
