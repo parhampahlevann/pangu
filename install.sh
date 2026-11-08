@@ -75,7 +75,44 @@ if [[ ! -f install.sh ]]; then
 fi
 
 # --- install ---
+MARKER="/tmp/.pengutunnel_marker_$$"
+touch "$MARKER"
+
 echo "[*] Running installer (--repair-existing) ..."
 bash install.sh --repair-existing
 
 echo "[+] PenguTunnel ${VERSION} installed successfully."
+
+# --- auto-detect the installed command/menu ---
+# 1) paths the package's own install.sh writes to (cp/install/ln -sf targets)
+mapfile -t REF_PATHS < <(
+  grep -oE '(/usr/(local/)?s?bin|/opt/[A-Za-z0-9._-]+)/[A-Za-z0-9._-]+' install.sh 2>/dev/null | sort -u
+)
+
+# 2) binaries that actually appeared on disk during this install
+mapfile -t NEW_BINS < <(
+  find /usr/local/bin /usr/bin /opt -maxdepth 2 -type f -newer "$MARKER" -perm -u+x 2>/dev/null
+)
+
+FOUND=""
+for c in "${NEW_BINS[@]}" "${REF_PATHS[@]}"; do
+  [[ -n "$c" && -x "$c" ]] && { FOUND="$c"; break; }
+done
+
+rm -f "$MARKER"
+
+if [[ -n "$FOUND" ]]; then
+  echo "[*] Launching menu: $FOUND"
+  echo
+  exec "$FOUND"
+fi
+
+# --- fallback: nothing auto-launchable found, show diagnostics instead of failing silently ---
+echo
+echo "[!] Could not auto-detect the menu command. Diagnostics below:"
+echo "--- candidate paths referenced in install.sh ---"
+printf '%s\n' "${REF_PATHS[@]}"
+echo "--- executables created/modified during install ---"
+printf '%s\n' "${NEW_BINS[@]}"
+echo "--- matching systemd units ---"
+systemctl list-unit-files 2>/dev/null | grep -i pengu || echo "(none found)"
