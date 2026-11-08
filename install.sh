@@ -1,51 +1,81 @@
 #!/usr/bin/env bash
+# PenguTunnel one-click installer
+# Usage: bash <(curl -fsSL https://raw.githubusercontent.com/parhampahlevann/pangu/main/install.sh)
+
 set -euo pipefail
 
-URL="https://github.com/parhampahlevann/pangu/releases/download/v5.1.6/PenguTunnel-5.4.1-Offline-Fix1-linux-amd64.zip"
-D="/opt/pengupanel-install"
+VERSION="5.4.1"
+ZIP_NAME="PenguTunnel-${VERSION}-Offline-Fix1-linux-amd64.zip"
+DIR_NAME="PenguTunnel-${VERSION}-Offline-Fix1-linux-amd64"
+URL="https://github.com/parhampahlevann/pangu/releases/download/v5.1.6/${ZIP_NAME}"
 
+# --- root check ---
 if [[ $EUID -ne 0 ]]; then
-  echo "[!] Run as root: sudo bash -c \"\$(curl -fsSL <SCRIPT_URL>)\"" >&2
-  exit 1
-fi
-
-need=()
-command -v unzip >/dev/null 2>&1 || need+=(unzip)
-command -v curl  >/dev/null 2>&1 || need+=(curl)
-if [[ ${#need[@]} -gt 0 ]]; then
-  if   command -v apt-get >/dev/null 2>&1; then apt-get update -y && apt-get install -y "${need[@]}"
-  elif command -v dnf     >/dev/null 2>&1; then dnf install -y "${need[@]}"
-  elif command -v yum     >/dev/null 2>&1; then yum install -y "${need[@]}"
-  else echo "[!] Install manually: ${need[*]}" >&2; exit 1; fi
-fi
-
-TTY_IN=/dev/null
-[[ -r /dev/tty ]] && TTY_IN=/dev/tty
-
-rm -rf "$D"; mkdir -p "$D"; cd "$D"
-
-echo "[*] Downloading..."
-curl -fL --retry 3 --connect-timeout 15 -o pengu.zip "$URL"
-unzip -oq pengu.zip
-
-# پیدا کردن خودکار پوشه‌ای که install.sh داخلش است
-INSTALLER="$(find "$D" -maxdepth 3 -name install.sh -type f | head -n 1)"
-if [[ -z "$INSTALLER" ]]; then
-  echo "[!] install.sh not found inside the zip." >&2
-  exit 1
-fi
-cd "$(dirname "$INSTALLER")"
-chmod +x install.sh
-
-echo "[*] Installing / repairing..."
-bash install.sh --repair-existing < "$TTY_IN"
-
-# اگر دستور منو نصب شده بود، اجرایش کن
-for c in pengu pangu penguctl pengupanel pengu-panel; do
-  if command -v "$c" >/dev/null 2>&1; then
-    exec "$c" < "$TTY_IN"
+  if command -v sudo >/dev/null 2>&1; then
+    exec sudo -E bash "$0" "$@"
+  else
+    echo "[!] Please run as root." >&2
+    exit 1
   fi
-done
+fi
 
-# در غیر این صورت، منوی خود installer
-exec bash install.sh < "$TTY_IN"
+# --- architecture check ---
+ARCH="$(uname -m)"
+if [[ "$ARCH" != "x86_64" && "$ARCH" != "amd64" ]]; then
+  echo "[!] This package is linux-amd64 only. Detected: $ARCH" >&2
+  exit 1
+fi
+
+# --- dependencies ---
+need_pkg=()
+command -v unzip >/dev/null 2>&1 || need_pkg+=(unzip)
+command -v curl  >/dev/null 2>&1 || command -v wget >/dev/null 2>&1 || need_pkg+=(curl)
+
+if ((${#need_pkg[@]})); then
+  echo "[*] Installing dependencies: ${need_pkg[*]}"
+  if command -v apt-get >/dev/null 2>&1; then
+    apt-get update -y && apt-get install -y "${need_pkg[@]}"
+  elif command -v dnf >/dev/null 2>&1; then
+    dnf install -y "${need_pkg[@]}"
+  elif command -v yum >/dev/null 2>&1; then
+    yum install -y "${need_pkg[@]}"
+  elif command -v apk >/dev/null 2>&1; then
+    apk add --no-cache "${need_pkg[@]}"
+  else
+    echo "[!] Unknown package manager. Install manually: ${need_pkg[*]}" >&2
+    exit 1
+  fi
+fi
+
+# --- download ---
+WORKDIR="$(mktemp -d /tmp/pengutunnel.XXXXXX)"
+trap 'rm -rf "$WORKDIR"' EXIT
+cd "$WORKDIR"
+
+echo "[*] Downloading ${ZIP_NAME} ..."
+if command -v curl >/dev/null 2>&1; then
+  curl -fL --retry 3 --retry-delay 2 -o "$ZIP_NAME" "$URL"
+else
+  wget -q --tries=3 -O "$ZIP_NAME" "$URL"
+fi
+
+# --- extract ---
+echo "[*] Extracting ..."
+unzip -oq "$ZIP_NAME"
+
+if [[ ! -d "$DIR_NAME" ]]; then
+  echo "[!] Expected folder '$DIR_NAME' not found after extraction." >&2
+  exit 1
+fi
+cd "$DIR_NAME"
+
+if [[ ! -f install.sh ]]; then
+  echo "[!] install.sh not found inside the package." >&2
+  exit 1
+fi
+
+# --- install ---
+echo "[*] Running installer (--repair-existing) ..."
+bash install.sh --repair-existing
+
+echo "[+] PenguTunnel ${VERSION} installed successfully."
